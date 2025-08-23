@@ -228,10 +228,13 @@ const CreateDAO = () => {
       // Use process.env.VITE_GITHUB_TOKEN or import.meta.env.VITE_GITHUB_TOKEN
       // assuming you have it set up in your build environment.
       // For this example, I'm keeping the placeholder as provided.
-      const GITHUB_TOKEN = "Add_YOUR_GITHUB_TOKEN_HERE"; // This token needs to be valid and stored securely
+      const GITHUB_TOKEN = import.meta.env.VITE_GITHUB_TOKEN || ""; // Use environment variable
 
-      if (!GITHUB_TOKEN) {
-        throw new Error("GitHub API token is not configured. Please set VITE_GITHUB_TOKEN in your .env file.");
+      if (!GITHUB_TOKEN || GITHUB_TOKEN === "your_github_token_here") {
+        console.warn("GitHub token not configured. Collaborator fetching will be disabled.");
+        setCollaborators([]);
+        setCollaboratorsLoading(false);
+        return;
       }
 
       const response = await fetch(
