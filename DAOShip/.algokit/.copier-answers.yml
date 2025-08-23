@@ -1,0 +1,9 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 2.1.4
+_src_path: gh:algorandfoundation/algokit-fullstack-template
+author_email: Aniketwarule775@gmail.com
+author_name: Aniket Warule
+contract_name: daoship
+preset_name: starter
+project_name: DAOShip
+

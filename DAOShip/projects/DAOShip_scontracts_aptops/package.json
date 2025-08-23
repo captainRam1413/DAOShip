@@ -1,0 +1,23 @@
+{
+  "name": "daoship-aptos-contracts",
+  "version": "1.0.0",
+  "description": "DAOShip DAO smart contracts for Aptos blockchain",
+  "scripts": {
+    "compile": "aptos move compile",
+    "test": "aptos move test",
+    "deploy:testnet": "aptos move publish --profile testnet",
+    "deploy:mainnet": "aptos move publish --profile mainnet",
+    "init:testnet": "aptos move run-script --script-function default::deploy::main --profile testnet",
+    "init:mainnet": "aptos move run-script --script-function default::deploy::main --profile mainnet"
+  },
+  "keywords": [
+    "dao",
+    "governance",
+    "aptos",
+    "move",
+    "blockchain",
+    "defi"
+  ],
+  "author": "DAOShip Team",
+  "license": "MIT"
+}
