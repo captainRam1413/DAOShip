@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GithubAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableIndexedDbPersistence, enableNetwork } from 'firebase/firestore';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBJTzY3DjZrz5ay0rDUA1Uh2Go2l8teBPg",
@@ -20,3 +20,33 @@ export const githubProvider = new GithubAuthProvider();
 // Request additional GitHub scopes (optional)
 githubProvider.addScope('repo');
 githubProvider.addScope('user:email');
+
+// Enable offline persistence
+enableIndexedDbPersistence(db).catch((err) => {
+  if (err.code == 'failed-precondition') {
+    console.warn('Firebase persistence failed: Multiple tabs open, persistence can only be enabled in one tab at a time.');
+  } else if (err.code == 'unimplemented') {
+    console.warn('Firebase persistence failed: The current browser does not support all of the features required to enable persistence');
+  } else {
+    console.warn('Firebase persistence failed:', err);
+  }
+});
+
+// Listen for online/offline status
+let isOnline = navigator.onLine;
+
+const handleOnline = () => {
+  console.log('Network connection restored, enabling Firestore');
+  isOnline = true;
+  enableNetwork(db).catch(console.error);
+};
+
+const handleOffline = () => {
+  console.log('Network connection lost, Firestore will work in offline mode');
+  isOnline = false;
+};
+
+window.addEventListener('online', handleOnline);
+window.addEventListener('offline', handleOffline);
+
+export { isOnline };

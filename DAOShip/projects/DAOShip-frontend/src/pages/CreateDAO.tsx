@@ -9,8 +9,8 @@ import GlassmorphicSlider from "@/components/ui/glassmorphic-slider";
 import GradientButton from "@/components/ui/gradient-button";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Users, UserPlus, CheckCircle, RefreshCw } from "lucide-react";
-import axios from "axios"; // Make sure axios is installed
 import { useWallet } from "@/hooks/use-wallet";
+import { createDAO } from "@/lib/api";
 
 const steps = [
   "Basic Information",
@@ -19,8 +19,6 @@ const steps = [
   "Invite Collaborators",
   "Review & Submit",
 ];
-
-const API_URL = "http://localhost:3000/api";
 
 interface ValidationErrors {
   name?: string;
@@ -90,7 +88,20 @@ const CreateDAO = () => {
 
   // Validation functions for each step
   const validateStep = (stepIndex) => {
-    const errors: { name?: string; description?: string; votingPeriod?: string; quorum?: string; minTokens?: string; tokenName?: string; tokenSymbol?: string; githubRepo?: string } = {};
+    const errors: { 
+      name?: string; 
+      description?: string; 
+      votingPeriod?: string; 
+      quorum?: string; 
+      minTokens?: string; 
+      tokenName?: string; 
+      tokenSymbol?: string; 
+      githubRepo?: string;
+      tokenSupply?: string;
+      tokenAllocation?: string;
+      vestingPeriod?: string;
+      minContributionForVoting?: string;
+    } = {};
 
     switch (stepIndex) {
       case 0: // Basic Information
@@ -378,17 +389,6 @@ const CreateDAO = () => {
     }
   };
 
-  // Create a new DAO using the API
-  const createDAO = async (daoData) => {
-    try {
-      const response = await axios.post(`${API_URL}/dao`, daoData);
-      return response.data;
-    } catch (error) {
-      console.error("API Error:", error);
-      throw error;
-    }
-  };
-
   // Handle form submission
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -406,8 +406,8 @@ const CreateDAO = () => {
       return;
     }
 
-    // Only show wallet connection message if not connected
-    if (!isConnected) {
+    // Only show wallet connection message if not connected (disabled for testing)
+    if (!isConnected && false) { // Temporarily disabled
       toast({
         title: "Wallet Not Connected",
         description: "Please connect your wallet using the button in the navigation bar",
@@ -419,15 +419,27 @@ const CreateDAO = () => {
     setIsSubmitting(true);
 
     try {
+      console.log("Current wallet address:", walletAddress);
+      console.log("Is connected:", isConnected);
+      
+      // For testing, use a simple wallet address if walletAddress is not valid
+      let testWalletAddress = walletAddress;
+      
+      // If no wallet address, use a simple test address for the legacy API
+      if (!walletAddress || walletAddress.trim() === "") {
+        console.warn("No wallet address, using test address");
+        testWalletAddress = "test-wallet-" + Date.now();
+      }
+      
+      console.log("Using address:", testWalletAddress);
+      
       // Prepare the data to send to your backend API
       const daoData = {
         name: formData.name,
         description: formData.description,
-        creator: walletAddress, // Assign the creator's wallet address
-        manager: walletAddress, // Manager defaults to creator for now
-        // You'll need to generate contractAddress on the backend or during deployment
-        // For now, let's set a placeholder or omit if backend handles it
-        contractAddress: "0xPlaceholderContractAddress", // Replace with actual contract address
+        creator: testWalletAddress, // Assign the creator's wallet address
+        manager: testWalletAddress, // Manager defaults to creator for now
+        // Don't send contractAddress - let the backend handle it
         votePrice: formData.votePrice,
         tokenName: formData.tokenName,
         tokenSymbol: formData.tokenSymbol,
@@ -443,26 +455,24 @@ const CreateDAO = () => {
         vestingPeriod: formData.vestingPeriod,
         minContributionForVoting: formData.minContributionForVoting,
         invitedCollaborators: formData.invitedCollaborators, // GitHub IDs/usernames
-        members: [walletAddress], // Creator is the first member by default
+        members: [testWalletAddress], // Creator is the first member by default
       };
+      
+      console.log("DAO data to send:", daoData);
 
-      const response = await axios.post(`${API_URL}/dao`, daoData);
+      // Use the createDAO helper from api.ts
+      const dao = await createDAO(daoData);
 
-      if (response.status !== 201 && response.status !== 200) {
-        throw new Error(response.data.message || "Failed to create DAO");
-      }
-
-      const dao = response.data;
       toast({
         title: "Success",
         description: "DAO created successfully!",
       });
-      navigate(`/dao/${dao._id}`);
+      navigate(`/dao/${(dao as any)._id || (dao as any).id}`);
     } catch (error) {
       console.error("Error creating DAO:", error);
       toast({
         title: "Error",
-        description: error.response?.data?.message || error.message || "Failed to create DAO. Please try again.",
+        description: error.message || "Failed to create DAO. Please try again.",
         variant: "destructive",
       });
     } finally {

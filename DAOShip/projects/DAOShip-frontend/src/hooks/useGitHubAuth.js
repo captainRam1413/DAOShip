@@ -4,7 +4,8 @@ import {
   signOut,
   onAuthStateChanged,
   linkWithPopup,
-  getAdditionalUserInfo
+  getAdditionalUserInfo,
+  GithubAuthProvider
 } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { auth, githubProvider, db } from './firebase.js';
@@ -17,6 +18,10 @@ export const useGitHubAuth = () => {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setUser(user);
+      setLoading(false);
+    }, (error) => {
+      console.error('Auth state change error:', error);
+      setError(error.message);
       setLoading(false);
     });
 
@@ -41,20 +46,20 @@ export const useGitHubAuth = () => {
                            additionalInfo?.username ||
                            user.reloadUserInfo?.screenName;
 
-      // Store user data in Firestore
+      // Store user data in Firestore with retry logic
       const userDoc = {
         uid: user.uid,
         email: user.email,
         displayName: user.displayName,
         photoURL: user.photoURL,
-        githubUsername: githubUsername, // Store the extracted GitHub username
-        githubAccessToken: accessToken, // Store securely - consider encryption
+        githubUsername: githubUsername,
+        githubAccessToken: accessToken,
         githubProfile: additionalInfo.profile,
         createdAt: new Date(),
         lastLoginAt: new Date(),
       };
 
-      await setDoc(doc(db, 'users', user.uid), userDoc, { merge: true });
+      await setDocWithRetry(doc(db, 'users', user.uid), userDoc, { merge: true });
 
       console.log('GitHub connected successfully:', user);
       return { success: true, user };
@@ -69,6 +74,10 @@ export const useGitHubAuth = () => {
         setError('Sign-in cancelled');
       } else if (error.code === 'auth/popup-blocked') {
         setError('Popup blocked. Please allow popups for this site.');
+      } else if (error.code === 'auth/network-request-failed') {
+        setError('Network error. Please check your internet connection and try again.');
+      } else if (error.code === 'firestore/unavailable') {
+        setError('Database temporarily unavailable. Please try again in a moment.');
       }
 
       return { success: false, error: error.message };
@@ -94,7 +103,7 @@ export const useGitHubAuth = () => {
 
   const getUserData = async (uid) => {
     try {
-      const userDoc = await getDoc(doc(db, 'users', uid));
+      const userDoc = await getDocWithRetry(doc(db, 'users', uid));
       if (userDoc.exists()) {
         return userDoc.data();
       }
@@ -114,4 +123,40 @@ export const useGitHubAuth = () => {
     getUserData,
     isConnected: !!user
   };
+};
+
+// Helper function to retry Firestore operations
+const setDocWithRetry = async (docRef, data, options, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await setDoc(docRef, data, options);
+      return;
+    } catch (error) {
+      console.log(`Firestore write attempt ${i + 1} failed:`, error.message);
+      
+      if (i === retries - 1) {
+        throw error; // Last attempt failed, throw the error
+      }
+      
+      // Wait before retrying (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+};
+
+const getDocWithRetry = async (docRef, retries = 3) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await getDoc(docRef);
+    } catch (error) {
+      console.log(`Firestore read attempt ${i + 1} failed:`, error.message);
+      
+      if (i === retries - 1) {
+        throw error;
+      }
+      
+      // Wait before retrying
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
 };

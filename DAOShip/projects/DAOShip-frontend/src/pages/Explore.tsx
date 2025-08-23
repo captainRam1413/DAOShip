@@ -30,7 +30,11 @@ const Explore = () => {
   const fetchDAOs = async () => {
     try {
       const response = await getAllDAOs();
-      setDaos(response);
+      // Handle both response shapes: array or { daos, pagination }
+      const list = Array.isArray(response)
+        ? response
+        : (response as any)?.daos ?? [];
+      setDaos(list as DAO[]);
     } catch (error) {
       console.error("Error fetching DAOs:", error);
       toast({

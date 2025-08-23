@@ -113,7 +113,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     const proposalData = {
       title: formData.title,
       description: formData.description,
-      dao: id, // DAO ID from URL param
+      daoId: id, // DAO ID from URL param - using correct field name for API
       creator: creatorId, // Use the valid ObjectId-compatible string
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
@@ -122,7 +122,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     console.log("Submitting proposal data:", proposalData);
 
     // Use the api.ts helper function
-    const createdProposal = await createProposal(id, proposalData);
+    const createdProposal = await createProposal(proposalData);
 
     console.log("Proposal has been created successfully!!", createdProposal);
 

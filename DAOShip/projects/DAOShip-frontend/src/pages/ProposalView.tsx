@@ -18,6 +18,7 @@ import GradientButton from "@/components/ui/gradient-button";
 import {
   getProposal,
   voteOnProposal,
+  checkUserVote,
 } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
@@ -31,6 +32,7 @@ const ProposalView = () => {
   const [userVote, setUserVote] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [timeLeft, setTimeLeft] = useState("");
+  const [currentUserId] = useState("507f1f77bcf86cd799439011"); // In a real app, this would come from auth
   const { toast } = useToast();
 
   useEffect(() => {
@@ -48,16 +50,18 @@ const ProposalView = () => {
 
   const fetchProposalData = async () => {
     try {
-      const [proposalData] = await Promise.all([
-        getProposal(daoId, proposalId),
+      const [proposalData, voteStatus] = await Promise.all([
+        getProposal(proposalId),
+        checkUserVote(proposalId, currentUserId),
         // getProposalComments(daoId, proposalId),
       ]);
       setProposal(proposalData);
       // setComments(commentsData);
 
-      // Check if current user has already voted
-      // This would need to be implemented based on your auth system
-      // setUserVote(hasUserVoted());
+      // Set user vote status if they have already voted
+      if (voteStatus.hasVoted && voteStatus.vote) {
+        setUserVote(voteStatus.vote.vote);
+      }
 
       updateTimeLeft();
     } catch (error) {
@@ -106,7 +110,11 @@ const ProposalView = () => {
     }
 
     try {
-      await voteOnProposal(daoId, proposalId, voteType);
+      await voteOnProposal(proposalId, { 
+        vote: voteType as 'yes' | 'no' | 'abstain', 
+        voter: currentUserId, 
+        votingPower: 1 
+      });
       setUserVote(voteType);
 
       // Update proposal data to reflect new vote
@@ -124,11 +132,30 @@ const ProposalView = () => {
       });
     } catch (error) {
       console.error("Error casting vote:", error);
-      toast({
-        title: "Error",
-        description: "Failed to cast your vote. Please try again.",
-        variant: "destructive",
-      });
+      
+      // Handle duplicate vote error specifically
+      if (error.message.includes("already voted")) {
+        toast({
+          title: "Already voted",
+          description: "You have already cast your vote on this proposal.",
+          variant: "default",
+        });
+        // Refresh the vote status
+        try {
+          const voteStatus = await checkUserVote(proposalId, currentUserId);
+          if (voteStatus.hasVoted && voteStatus.vote) {
+            setUserVote(voteStatus.vote.vote);
+          }
+        } catch (refreshError) {
+          console.error("Error refreshing vote status:", refreshError);
+        }
+      } else {
+        toast({
+          title: "Error",
+          description: "Failed to cast your vote. Please try again.",
+          variant: "destructive",
+        });
+      }
     }
   };
 
@@ -160,6 +187,40 @@ const ProposalView = () => {
     if (total === 0) return 0;
     return (voteCount / total) * 100;
   };
+
+  // Dynamic vote configuration
+  const voteTypes = [
+    {
+      key: 'yes',
+      label: 'Yes',
+      icon: CheckCircle,
+      color: 'green',
+      count: proposal?.yesVotes || 0,
+      bgColor: 'bg-green-500',
+      textColor: 'text-green-400',
+      hoverColor: 'hover:bg-green-500/20 hover:text-green-400'
+    },
+    {
+      key: 'no',
+      label: 'No', 
+      icon: XCircle,
+      color: 'red',
+      count: proposal?.noVotes || 0,
+      bgColor: 'bg-red-500',
+      textColor: 'text-red-400',
+      hoverColor: 'hover:bg-red-500/20 hover:text-red-400'
+    },
+    {
+      key: 'abstain',
+      label: 'Abstain',
+      icon: CircleDashed,
+      color: 'gray',
+      count: proposal?.abstainVotes || 0,
+      bgColor: 'bg-gray-500',
+      textColor: 'text-gray-400',
+      hoverColor: 'hover:bg-gray-500/20 hover:text-gray-400'
+    }
+  ];
 
   if (isLoading) {
     return (
@@ -402,106 +463,41 @@ const ProposalView = () => {
                       )}
                     </div>
 
-                    {/* Progress Bars */}
+                    {/* Dynamic Progress Bars */}
                     <div className="space-y-4">
                       <h4 className="text-white font-medium">Votes</h4>
 
-                      {/* Yes votes */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="flex items-center text-green-400">
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                            Yes
-                          </span>
-                          <span className="text-white">
-                            {proposal.yesVotes} (
-                            {calculatePercentage(proposal.yesVotes).toFixed(1)}
-                            %)
-                          </span>
-                        </div>
-                        <motion.div
-                          className="h-2 bg-white/10 rounded-full overflow-hidden"
-                          initial={{ width: 0 }}
-                          animate={{ width: "100%" }}
-                          transition={{ duration: 0.5, delay: 0.3 }}
-                        >
-                          <motion.div
-                            className="h-full bg-green-500 rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{
-                              width: `${calculatePercentage(
-                                proposal.yesVotes
-                              )}%`,
-                            }}
-                            transition={{ duration: 0.8, delay: 0.6 }}
-                          />
-                        </motion.div>
-                      </div>
-
-                      {/* No votes */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="flex items-center text-red-400">
-                            <XCircle className="h-4 w-4 mr-2" />
-                            No
-                          </span>
-                          <span className="text-white">
-                            {proposal.noVotes} (
-                            {calculatePercentage(proposal.noVotes).toFixed(1)}%)
-                          </span>
-                        </div>
-                        <motion.div
-                          className="h-2 bg-white/10 rounded-full overflow-hidden"
-                          initial={{ width: 0 }}
-                          animate={{ width: "100%" }}
-                          transition={{ duration: 0.5, delay: 0.3 }}
-                        >
-                          <motion.div
-                            className="h-full bg-red-500 rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{
-                              width: `${calculatePercentage(
-                                proposal.noVotes
-                              )}%`,
-                            }}
-                            transition={{ duration: 0.8, delay: 0.7 }}
-                          />
-                        </motion.div>
-                      </div>
-
-                      {/* Abstain votes */}
-                      <div className="space-y-1">
-                        <div className="flex justify-between text-sm">
-                          <span className="flex items-center text-gray-400">
-                            <CircleDashed className="h-4 w-4 mr-2" />
-                            Abstain
-                          </span>
-                          <span className="text-white">
-                            {proposal.abstainVotes} (
-                            {calculatePercentage(proposal.abstainVotes).toFixed(
-                              1
-                            )}
-                            %)
-                          </span>
-                        </div>
-                        <motion.div
-                          className="h-2 bg-white/10 rounded-full overflow-hidden"
-                          initial={{ width: 0 }}
-                          animate={{ width: "100%" }}
-                          transition={{ duration: 0.5, delay: 0.3 }}
-                        >
-                          <motion.div
-                            className="h-full bg-gray-500 rounded-full"
-                            initial={{ width: 0 }}
-                            animate={{
-                              width: `${calculatePercentage(
-                                proposal.abstainVotes
-                              )}%`,
-                            }}
-                            transition={{ duration: 0.8, delay: 0.8 }}
-                          />
-                        </motion.div>
-                      </div>
+                      {voteTypes.map((voteType, index) => {
+                        const percentage = calculatePercentage(voteType.count);
+                        const IconComponent = voteType.icon;
+                        
+                        return (
+                          <div key={voteType.key} className="space-y-1">
+                            <div className="flex justify-between text-sm">
+                              <span className={`flex items-center ${voteType.textColor}`}>
+                                <IconComponent className="h-4 w-4 mr-2" />
+                                {voteType.label}
+                              </span>
+                              <span className="text-white">
+                                {voteType.count} ({percentage.toFixed(1)}%)
+                              </span>
+                            </div>
+                            <motion.div
+                              className="h-2 bg-white/10 rounded-full overflow-hidden"
+                              initial={{ width: 0 }}
+                              animate={{ width: "100%" }}
+                              transition={{ duration: 0.5, delay: 0.3 }}
+                            >
+                              <motion.div
+                                className={`h-full ${voteType.bgColor} rounded-full`}
+                                initial={{ width: 0 }}
+                                animate={{ width: `${percentage}%` }}
+                                transition={{ duration: 0.8, delay: 0.6 + (index * 0.1) }}
+                              />
+                            </motion.div>
+                          </div>
+                        );
+                      })}
                     </div>
 
                     {/* Quorum Status */}
@@ -544,59 +540,45 @@ const ProposalView = () => {
                       </h3>
 
                       <div className="space-y-3">
-                        <button
-                          onClick={() => handleVote("yes")}
-                          disabled={userVote !== null}
-                          className={`w-full p-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
-                            userVote === "yes"
-                              ? "bg-green-500 text-white"
-                              : userVote !== null
-                              ? "bg-white/5 text-white/50 cursor-not-allowed"
-                              : "bg-white/10 text-white hover:bg-green-500/20 hover:text-green-400"
-                          }`}
-                        >
-                          <CheckCircle className="h-5 w-5" />
-                          Vote Yes
-                        </button>
-
-                        <button
-                          onClick={() => handleVote("no")}
-                          disabled={userVote !== null}
-                          className={`w-full p-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
-                            userVote === "no"
-                              ? "bg-red-500 text-white"
-                              : userVote !== null
-                              ? "bg-white/5 text-white/50 cursor-not-allowed"
-                              : "bg-white/10 text-white hover:bg-red-500/20 hover:text-red-400"
-                          }`}
-                        >
-                          <XCircle className="h-5 w-5" />
-                          Vote No
-                        </button>
-
-                        <button
-                          onClick={() => handleVote("abstain")}
-                          disabled={userVote !== null}
-                          className={`w-full p-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
-                            userVote === "abstain"
-                              ? "bg-gray-500 text-white"
-                              : userVote !== null
-                              ? "bg-white/5 text-white/50 cursor-not-allowed"
-                              : "bg-white/10 text-white hover:bg-gray-500/20 hover:text-gray-400"
-                          }`}
-                        >
-                          <CircleDashed className="h-5 w-5" />
-                          Abstain
-                        </button>
+                        {voteTypes.map((voteType) => {
+                          const IconComponent = voteType.icon;
+                          return (
+                            <button
+                              key={voteType.key}
+                              onClick={() => handleVote(voteType.key)}
+                              disabled={userVote !== null}
+                              className={`w-full p-3 rounded-lg flex items-center justify-center gap-2 transition-all ${
+                                userVote === voteType.key
+                                  ? `${voteType.bgColor} text-white`
+                                  : userVote !== null
+                                  ? "bg-white/5 text-white/50 cursor-not-allowed"
+                                  : `bg-white/10 text-white ${voteType.hoverColor}`
+                              }`}
+                            >
+                              <IconComponent className="h-5 w-5" />
+                              Vote {voteType.label}
+                            </button>
+                          );
+                        })}
                       </div>
 
                       {userVote && (
                         <motion.div
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className="mt-4 text-center text-daoship-text-gray text-sm"
+                          className="mt-4 p-3 bg-daoship-primary/10 border border-daoship-primary/20 rounded-lg"
                         >
-                          You have already voted on this proposal.
+                          <div className="text-center text-sm">
+                            <span className="text-daoship-text-gray">
+                              You voted: 
+                            </span>
+                            <span className="text-white font-medium ml-1 capitalize">
+                              {userVote}
+                            </span>
+                          </div>
+                          <div className="text-center text-daoship-text-gray text-xs mt-1">
+                            Each member can only vote once per proposal.
+                          </div>
                         </motion.div>
                       )}
                     </GlassmorphicCard>

@@ -47,32 +47,9 @@ router.get("/dao/:daoId", async (req, res) => {
       createdAt: -1,
     });
 
-    // Then, we'll manually process the results to handle the potentially invalid creator IDs
-    const processedProposals = [];
-
-    for (const proposal of proposals) {
-      try {
-        // Only try to populate if the creator looks like a valid ObjectId
-        if (mongoose.Types.ObjectId.isValid(proposal.creator)) {
-          const populatedProposal = await Proposal.findById(proposal._id)
-            .populate("creator", "username walletAddress")
-            .lean();
-          processedProposals.push(populatedProposal);
-        } else {
-          // For invalid creator IDs, just return the proposal with a placeholder creator
-          const plainProposal = proposal.toObject();
-          plainProposal.creator = {
-            _id: plainProposal.creator,
-            username: "Unknown User",
-            walletAddress: "N/A",
-          };
-          processedProposals.push(plainProposal);
-        }
-      } catch (err) {
-        // If population fails for this item, add it without population
-        processedProposals.push(proposal.toObject());
-      }
-    }
+    // Since we're using Aptos addresses as creators (not ObjectIds), we don't populate creator
+    // Just return the proposals with creator as address string
+    const processedProposals = proposals.map(proposal => proposal.toObject());
 
     res.json(processedProposals);
   } catch (error) {
@@ -85,12 +62,34 @@ router.get("/dao/:daoId", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const proposal = await Proposal.findById(req.params.id)
-      .populate("creator", "username walletAddress")
       .populate("dao", "name contractAddress");
     if (!proposal) {
       return res.status(404).json({ message: "Proposal not found" });
     }
     res.json(proposal);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Check if a user has voted on a proposal
+router.get("/:id/vote/:voterId", async (req, res) => {
+  try {
+    const proposal = await Proposal.findById(req.params.id);
+    if (!proposal) {
+      return res.status(404).json({ message: "Proposal not found" });
+    }
+
+    const existingVote = proposal.votes.find(v => v.voter.toString() === req.params.voterId.toString());
+    
+    res.json({
+      hasVoted: !!existingVote,
+      vote: existingVote ? {
+        vote: existingVote.vote,
+        votingPower: existingVote.votingPower,
+        timestamp: existingVote._id ? existingVote._id.getTimestamp() : null
+      } : null
+    });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -108,6 +107,18 @@ router.post("/:id/vote", async (req, res) => {
 
     if (proposal.status !== "active") {
       return res.status(400).json({ message: "Proposal is not active" });
+    }
+
+    // Check if the voter has already voted
+    const existingVote = proposal.votes.find(v => v.voter.toString() === voter.toString());
+    if (existingVote) {
+      return res.status(400).json({ 
+        message: "You have already voted on this proposal",
+        existingVote: {
+          vote: existingVote.vote,
+          votingPower: existingVote.votingPower
+        }
+      });
     }
 
     // Record vote on Algorand
