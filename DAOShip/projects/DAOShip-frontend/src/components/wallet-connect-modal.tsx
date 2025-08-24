@@ -47,11 +47,11 @@ const WalletConnectModal = ({
 
           <div className="space-y-3">
             <WalletOption
-              name="Pera Wallet"
-              description="Algorand's official mobile wallet"
+              name="Petra Wallet"
+              description="Aptos's official wallet"
               icon={<Wallet className="h-6 w-6" />}
-              onClick={() => handleConnect("Pera Wallet")}
-              isLoading={connecting === "Pera Wallet"}
+              onClick={() => handleConnect("petra")}
+              isLoading={connecting === "petra"}
             />
 
             <WalletOption

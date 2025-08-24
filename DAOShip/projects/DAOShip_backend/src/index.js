@@ -5,6 +5,7 @@ const cors = require("cors");
 const daoRoutes = require("./routes/dao.routes");
 const daoAptosRoutes = require("./routes/dao.routes.aptos");
 const proposalRoutes = require("./routes/proposal.routes");
+const proposalAptosRoutes = require("./routes/proposal.routes.aptos");
 const userRoutes = require("./routes/user.routes");
 
 const app = express();
@@ -52,7 +53,7 @@ app.get('/', (req, res) => {
 app.use("/api/dao", daoRoutes);
 app.use("/api/v2/dao", daoAptosRoutes); // Aptos-integrated routes
 app.use("/api/proposal", proposalRoutes);
-app.use("/api/v2/proposal", proposalRoutes); // Use same proposal routes for v2 for now
+app.use("/api/v2/proposal", proposalAptosRoutes); // Aptos-integrated proposal routes
 app.use("/api/user", userRoutes);
 
 // Error handling middleware

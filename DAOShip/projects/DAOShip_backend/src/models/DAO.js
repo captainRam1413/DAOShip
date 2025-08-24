@@ -42,6 +42,34 @@ const daoSchema = new mongoose.Schema({
     required: true,
     min: 1
   },
+  // Aptos Token Integration Fields
+  tokenAddress: {
+    type: String,
+    required: false, // The actual token contract address on Aptos
+  },
+  governanceTokenAddress: {
+    type: String,
+    required: false, // Optional for backward compatibility
+  },
+  tokenCreationHash: {
+    type: String,
+    required: false
+  },
+  tokenDistributionHashes: {
+    type: [String],
+    default: []
+  },
+  tokenDistributionStatus: {
+    type: String,
+    enum: ['pending', 'completed', 'failed', 'partial'],
+    default: 'pending'
+  },
+  tokenDecimals: {
+    type: Number,
+    default: 8,
+    min: 0,
+    max: 18
+  },
   votingPeriod: {
     type: Number,
     required: true,

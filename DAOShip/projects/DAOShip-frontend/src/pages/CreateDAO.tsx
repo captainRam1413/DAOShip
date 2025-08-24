@@ -10,7 +10,8 @@ import GradientButton from "@/components/ui/gradient-button";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Users, UserPlus, CheckCircle, RefreshCw } from "lucide-react";
 import { useWallet } from "@/hooks/use-wallet";
-import { createDAO } from "@/lib/api";
+import { createDAO, createDAOWithWallet, getDAOToken } from "@/lib/api";
+import { createTokenWithWallet, checkTransactionInWallet } from "@/lib/aptos-wallet";
 
 const steps = [
   "Basic Information",
@@ -46,6 +47,23 @@ const CreateDAO = () => {
   const [collaboratorsError, setCollaboratorsError] = useState(null);
   const [invitingCollaborators, setInvitingCollaborators] = useState([]);
   const [validationErrors, setValidationErrors] = useState<ValidationErrors>({});
+  const [tokenCreationStatus, setTokenCreationStatus] = useState<{
+    creating: boolean;
+    created: boolean;
+    distributed: boolean;
+    waitingForSignature: boolean;
+    realBlockchainToken: boolean;
+    error?: string;
+    tokenAddress?: string;
+    transactionHash?: string;
+    distributionSummary?: any;
+  }>({
+    creating: false,
+    created: false,
+    distributed: false,
+    waitingForSignature: false,
+    realBlockchainToken: false
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -54,6 +72,7 @@ const CreateDAO = () => {
     tokenName: "",
     tokenSymbol: "",
     tokenSupply: 1000000,
+    tokenDecimals: 8,
     votingPeriod: 7,
     quorum: 50,
     minTokens: 100,
@@ -406,44 +425,59 @@ const CreateDAO = () => {
       return;
     }
 
-    // Only show wallet connection message if not connected (disabled for testing)
-    if (!isConnected && false) { // Temporarily disabled
+    // Check if wallet is connected
+    if (!isConnected) {
       toast({
         title: "Wallet Not Connected",
-        description: "Please connect your wallet using the button in the navigation bar",
+        description: "Please connect your wallet to create a DAO",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Check if we have a valid wallet address
+    if (!walletAddress || walletAddress.trim() === "") {
+      toast({
+        title: "Invalid Wallet Address",
+        description: "Please reconnect your wallet and try again",
         variant: "destructive",
       });
       return;
     }
 
     setIsSubmitting(true);
+    setTokenCreationStatus({ 
+      creating: false, 
+      created: false, 
+      distributed: false, 
+      waitingForSignature: false,
+      realBlockchainToken: false
+    });
 
     try {
-      console.log("Current wallet address:", walletAddress);
+      console.log("Creating DAO with Aptos token integration...");
+      console.log("Wallet address:", walletAddress);
       console.log("Is connected:", isConnected);
       
-      // For testing, use a simple wallet address if walletAddress is not valid
-      let testWalletAddress = walletAddress;
+      // Show initial DAO creation status
+      setTokenCreationStatus({ 
+        creating: true, 
+        created: false, 
+        distributed: false,
+        waitingForSignature: false,
+        realBlockchainToken: false
+      });
       
-      // If no wallet address, use a simple test address for the legacy API
-      if (!walletAddress || walletAddress.trim() === "") {
-        console.warn("No wallet address, using test address");
-        testWalletAddress = "test-wallet-" + Date.now();
-      }
-      
-      console.log("Using address:", testWalletAddress);
-      
-      // Prepare the data to send to your backend API
+      // Prepare the data to send to the backend API
       const daoData = {
         name: formData.name,
         description: formData.description,
-        creator: testWalletAddress, // Assign the creator's wallet address
-        manager: testWalletAddress, // Manager defaults to creator for now
-        // Don't send contractAddress - let the backend handle it
+        manager: walletAddress, // Use actual wallet address
         votePrice: formData.votePrice,
         tokenName: formData.tokenName,
         tokenSymbol: formData.tokenSymbol,
         tokenSupply: formData.tokenSupply,
+        tokenDecimals: formData.tokenDecimals,
         votingPeriod: formData.votingPeriod,
         quorum: formData.quorum,
         minTokens: formData.minTokens,
@@ -454,25 +488,142 @@ const CreateDAO = () => {
         contributionRewards: formData.contributionRewards,
         vestingPeriod: formData.vestingPeriod,
         minContributionForVoting: formData.minContributionForVoting,
-        invitedCollaborators: formData.invitedCollaborators, // GitHub IDs/usernames
-        members: [testWalletAddress], // Creator is the first member by default
+        invitedCollaborators: formData.invitedCollaborators,
+        members: [walletAddress], // Creator is the first member
       };
       
-      console.log("DAO data to send:", daoData);
+      console.log("DAO data to create:", daoData);
 
-      // Use the createDAO helper from api.ts
-      const dao = await createDAO(daoData);
-
+      // Show toast for wallet signing request
       toast({
-        title: "Success",
-        description: "DAO created successfully!",
+        title: "Creating DAO",
+        description: "Please sign the transaction in your wallet to create the DAO...",
       });
-      navigate(`/dao/${(dao as any)._id || (dao as any).id}`);
-    } catch (error) {
+
+      // Use wallet-integrated DAO creation (creates DAO but not real token yet)
+      const result = await createDAOWithWallet(daoData, walletAddress);
+      
+      console.log('DAO created successfully:', result);
+      
+      // DAO created successfully, now create REAL token on Aptos
+      if (result && (result._id || result.id)) {
+        setTokenCreationStatus({
+          creating: false,
+          created: false,
+          distributed: false,
+          waitingForSignature: true,
+          realBlockchainToken: true
+        });
+
+        toast({
+          title: "DAO Created!",
+          description: "Now creating governance token on Aptos blockchain. Please sign the token creation transaction...",
+        });
+
+        try {
+          // Create real token with wallet signing
+          const tokenResult = await createTokenWithWallet(result._id || result.id, walletAddress);
+          
+          if (tokenResult.success) {
+            setTokenCreationStatus({
+              creating: false,
+              created: true,
+              distributed: true,
+              waitingForSignature: false,
+              realBlockchainToken: true,
+              tokenAddress: tokenResult.tokenAddress,
+              transactionHash: tokenResult.transactionHash
+            });
+
+            toast({
+              title: "🎉 Real Token Created!",
+              description: `Governance token created on Aptos! Transaction: ${tokenResult.transactionHash?.slice(0, 10)}...`,
+            });
+
+            // Check if transaction is visible in wallet
+            if (tokenResult.transactionHash) {
+              setTimeout(async () => {
+                const txCheck = await checkTransactionInWallet(tokenResult.transactionHash!);
+                if (txCheck.visible) {
+                  toast({
+                    title: "Transaction Confirmed",
+                    description: "Token creation transaction is now visible in your Petra wallet!",
+                  });
+                  
+                  // Navigate to DAO dashboard after successful transaction
+                  setTimeout(() => {
+                    navigate(`/dao/${result._id || result.id}`);
+                  }, 2000);
+                }
+              }, 3000);
+            } else {
+              // Navigate after delay if no transaction hash
+              setTimeout(() => {
+                navigate(`/dao/${result._id || result.id}`);
+              }, 4000);
+            }
+
+          } else {
+            throw new Error(tokenResult.error || 'Token creation failed');
+          }
+        } catch (tokenError: any) {
+          console.error('Real token creation failed:', tokenError);
+          
+          setTokenCreationStatus({
+            creating: false,
+            created: false,
+            distributed: false,
+            waitingForSignature: false,
+            realBlockchainToken: false,
+            error: tokenError.message
+          });
+
+          toast({
+            title: "Token Creation Failed",
+            description: tokenError.message?.includes('rejected') 
+              ? "Token creation was cancelled by user" 
+              : `Token creation failed: ${tokenError.message}`,
+            variant: "destructive",
+          });
+          
+          // Navigate to DAO dashboard even if token creation failed (DAO was still created)
+          setTimeout(() => {
+            navigate(`/dao/${result._id || result.id}`);
+          }, 3000);
+        }
+      } else {
+        // No wallet connected - navigate immediately
+        setTimeout(() => {
+          navigate(`/dao/${result._id || result.id}`);
+        }, 2000);
+      }
+      
+    } catch (error: any) {
       console.error("Error creating DAO:", error);
+      
+      setTokenCreationStatus({
+        creating: false,
+        created: false,
+        distributed: false,
+        waitingForSignature: false,
+        realBlockchainToken: false,
+        error: error.message
+      });
+      
+      let errorMessage = error.message || "Failed to create DAO. Please try again.";
+      let errorTitle = "Error";
+      
+      if (error.message?.includes('cancelled') || error.message?.includes('rejected')) {
+        errorTitle = "Transaction Cancelled";
+        errorMessage = "DAO creation was cancelled. You can try again anytime.";
+      } else if (error.message?.includes('Wallet not connected')) {
+        errorTitle = "Wallet Error";
+        errorMessage = "Please reconnect your wallet and try again.";
+      }
+      
       toast({
-        title: "Error",
-        description: error.message || "Failed to create DAO. Please try again.",
+        title: errorTitle,
+        description: errorMessage,
         variant: "destructive",
       });
     } finally {
@@ -678,18 +829,40 @@ const CreateDAO = () => {
               </div>
             </div>
 
-            <div>
-              <GlassmorphicInput
-                label="GitHub Repository URL"
-                name="githubRepo"
-                value={formData.githubRepo}
-                onChange={handleChange}
-                placeholder="https://github.com/username/repo"
-                required
-              />
-              {validationErrors.githubRepo && (
-                <p className="text-red-400 text-sm mt-1">{validationErrors.githubRepo}</p>
-              )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <GlassmorphicInput
+                  label="Token Decimals"
+                  name="tokenDecimals"
+                  type="number"
+                  value={formData.tokenDecimals.toString()}
+                  onChange={(e) =>
+                    setFormData({
+                      ...formData,
+                      tokenDecimals: parseInt(e.target.value) || 8,
+                    })
+                  }
+                  min="0"
+                  max="18"
+                />
+                <p className="text-xs text-white/60 mt-1">
+                  Number of decimal places (0-18, default: 8)
+                </p>
+              </div>
+
+              <div>
+                <GlassmorphicInput
+                  label="GitHub Repository URL"
+                  name="githubRepo"
+                  value={formData.githubRepo}
+                  onChange={handleChange}
+                  placeholder="https://github.com/username/repo"
+                  required
+                />
+                {validationErrors.githubRepo && (
+                  <p className="text-red-400 text-sm mt-1">{validationErrors.githubRepo}</p>
+                )}
+              </div>
             </div>
 
             <div className="p-4 glass-card rounded-lg">
@@ -1201,6 +1374,99 @@ const CreateDAO = () => {
                 )}
               </div>
             </GlassmorphicCard>
+
+            {/* Token Creation Status */}
+            {(tokenCreationStatus.creating || tokenCreationStatus.waitingForSignature || tokenCreationStatus.created || tokenCreationStatus.error) && (
+              <GlassmorphicCard className="p-6">
+                <h3 className="text-xl font-semibold text-white mb-4">
+                  {tokenCreationStatus.realBlockchainToken ? 'Real Aptos Token Creation' : 'Governance Token Status'}
+                </h3>
+
+                <div className="space-y-4">
+                  {tokenCreationStatus.creating && (
+                    <div className="flex items-center space-x-3">
+                      <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-daoship-mint"></div>
+                      <span className="text-white">Creating DAO first...</span>
+                    </div>
+                  )}
+
+                  {tokenCreationStatus.waitingForSignature && (
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-3">
+                        <div className="animate-pulse rounded-full h-6 w-6 border-2 border-orange-400 bg-orange-400/20"></div>
+                        <span className="text-white">Waiting for wallet signature...</span>
+                      </div>
+                      <div className="pl-9">
+                        <p className="text-sm text-orange-300">
+                          🔐 Please approve the token creation transaction in your Petra wallet
+                        </p>
+                        <p className="text-sm text-white/60">
+                          This will create a real governance token on the Aptos blockchain
+                        </p>
+                        <p className="text-sm text-yellow-400 mt-2">
+                          💡 If you see a black screen in the wallet popup, try refreshing the wallet extension or reconnecting
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {tokenCreationStatus.created && (
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-3">
+                        <CheckCircle className="h-6 w-6 text-daoship-mint" />
+                        <span className="text-white">
+                          {tokenCreationStatus.realBlockchainToken ? '🎉 Real token created on Aptos!' : 'Token created successfully!'}
+                        </span>
+                      </div>
+                      
+                      {tokenCreationStatus.tokenAddress && (
+                        <div className="pl-9">
+                          <p className="text-sm text-white/70">Token Address:</p>
+                          <p className="text-sm text-daoship-mint font-mono break-all">
+                            {tokenCreationStatus.tokenAddress}
+                          </p>
+                        </div>
+                      )}
+
+                      {tokenCreationStatus.transactionHash && (
+                        <div className="pl-9">
+                          <p className="text-sm text-white/70">Transaction Hash:</p>
+                          <p className="text-sm text-green-400 font-mono break-all">
+                            {tokenCreationStatus.transactionHash}
+                          </p>
+                          <p className="text-sm text-green-300 mt-1">
+                            ✅ This transaction is visible in your Petra wallet!
+                          </p>
+                        </div>
+                      )}
+
+                      {tokenCreationStatus.realBlockchainToken && (
+                        <div className="pl-9 mt-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                          <p className="text-sm text-green-300 font-medium">
+                            🌐 Real Blockchain Token Created!
+                          </p>
+                          <p className="text-sm text-white/80 mt-1">
+                            Your governance token now exists on the Aptos blockchain and can be viewed in your wallet.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {tokenCreationStatus.error && (
+                    <div className="flex items-center space-x-3">
+                      <div className="h-6 w-6 bg-red-500 rounded-full flex items-center justify-center">
+                        <span className="text-white text-sm">!</span>
+                      </div>
+                      <div>
+                        <span className="text-red-400">Token creation failed</span>
+                        <p className="text-sm text-white/60 mt-1">{tokenCreationStatus.error}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </GlassmorphicCard>
+            )}
 
             <div className="p-4 glass-card rounded-lg mt-2">
               <p className="text-sm text-daoship-text-gray">

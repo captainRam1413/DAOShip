@@ -33,6 +33,20 @@ export const useGitHubAuth = () => {
       setLoading(true);
       setError(null);
 
+      console.log('Attempting GitHub authentication...');
+      
+      // For now, just simulate successful authentication without Firebase
+      // This allows the app to work even if Firebase is having issues
+      console.log('GitHub auth temporarily disabled due to Firebase connectivity issues');
+      
+      setLoading(false);
+      return {
+        success: false,
+        message: 'GitHub authentication temporarily disabled. You can still create DAOs without GitHub integration.'
+      };
+
+      /*
+      // Original GitHub auth code - commented out temporarily
       const result = await signInWithPopup(auth, githubProvider);
       const user = result.user;
       const additionalInfo = getAdditionalUserInfo(result);
@@ -45,6 +59,7 @@ export const useGitHubAuth = () => {
       const githubUsername = user.providerData[0]?.displayName ||
                            additionalInfo?.username ||
                            user.reloadUserInfo?.screenName;
+      */
 
       // Store user data in Firestore with retry logic
       const userDoc = {
@@ -103,14 +118,36 @@ export const useGitHubAuth = () => {
 
   const getUserData = async (uid) => {
     try {
+      // For now, disable Firebase calls if we're having connectivity issues
+      // The DAO functionality should work without Firebase authentication
+      console.log('getUserData called for uid:', uid);
+      
+      // Return a basic user object if Firebase is having issues
+      return {
+        uid: uid,
+        githubConnected: false,
+        displayName: 'User',
+        email: null
+      };
+      
+      // Original Firebase code - commented out temporarily
+      /*
       const userDoc = await getDocWithRetry(doc(db, 'users', uid));
       if (userDoc.exists()) {
         return userDoc.data();
       }
       return null;
+      */
     } catch (error) {
       console.error('Error fetching user data:', error);
-      return null;
+      // Return a fallback user object instead of null
+      return {
+        uid: uid,
+        githubConnected: false,
+        displayName: 'User',
+        email: null,
+        error: 'Firebase connectivity issue'
+      };
     }
   };
 

@@ -5,10 +5,13 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
+    "dev": "nodemon src/index.js",
+    "test:token": "node test_aptos_token_integration.js",
+    "test:token:bash": "./run_token_tests.sh"
   },
   "dependencies": {
     "@algorandfoundation/algokit-utils": "^2.0.0",
+    "@aptos-labs/ts-sdk": "^4.0.0",
     "algosdk": "^2.5.0",
     "axios": "^1.9.0",
     "bcryptjs": "^2.4.3",

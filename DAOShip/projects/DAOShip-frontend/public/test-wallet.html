@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Petra Wallet Test</title>
+</head>
+<body>
+    <h1>Petra Wallet Transaction Test</h1>
+    <button onclick="connectWallet()">Connect Wallet</button>
+    <button onclick="testSimpleTransaction()">Test Simple Transaction</button>
+    <div id="output"></div>
+
+    <script>
+        let walletConnected = false;
+        
+        async function connectWallet() {
+            try {
+                if (!window.aptos) {
+                    alert('Petra wallet not found');
+                    return;
+                }
+                
+                await window.aptos.connect();
+                const account = await window.aptos.account();
+                document.getElementById('output').innerHTML = `Connected: ${account.address}`;
+                walletConnected = true;
+            } catch (error) {
+                document.getElementById('output').innerHTML = `Connection error: ${error.message}`;
+                console.error('Connection error:', error);
+            }
+        }
+        
+        async function testSimpleTransaction() {
+            try {
+                if (!walletConnected) {
+                    alert('Please connect wallet first');
+                    return;
+                }
+                
+                if (!window.aptos) {
+                    alert('Petra wallet not found');
+                    return;
+                }
+                
+                // Get current account
+                const account = await window.aptos.account();
+                console.log('Account:', account);
+                
+                // Try the simplest possible transaction
+                const payload = {
+                    function: "0x1::coin::transfer",
+                    type_arguments: ["0x1::aptos_coin::AptosCoin"],
+                    arguments: [
+                        account.address, // to self
+                        "1" // 1 octa (smallest unit)
+                    ]
+                };
+                
+                console.log('Payload:', payload);
+                document.getElementById('output').innerHTML = 'Requesting signature...';
+                
+                const result = await window.aptos.signAndSubmitTransaction(payload);
+                console.log('Transaction result:', result);
+                
+                document.getElementById('output').innerHTML = `Success! Hash: ${result.hash}`;
+                
+            } catch (error) {
+                document.getElementById('output').innerHTML = `Transaction error: ${error.message}`;
+                console.error('Transaction error:', error);
+            }
+        }
+    </script>
+</body>
+</html>
