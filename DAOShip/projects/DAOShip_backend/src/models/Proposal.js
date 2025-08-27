@@ -47,6 +47,9 @@ const proposalSchema = new mongoose.Schema({
         enum: ["yes", "no", "abstain"],
       },
       votingPower: Number,
+      signature: String, // Wallet signature for the vote
+      signedMessage: String, // The signed message content
+      transactionHash: String, // Blockchain transaction hash
     },
   ],
   yesVotes: {
@@ -60,6 +63,33 @@ const proposalSchema = new mongoose.Schema({
   abstainVotes: {
     type: Number,
     default: 0,
+  },
+  // Wallet signature fields for proposal creation
+  signature: {
+    type: String,
+    // Wallet signature from proposal creator
+  },
+  signedMessage: {
+    type: String,
+    // The message that was signed by the wallet
+  },
+  transactionHash: {
+    type: String,
+    // Blockchain transaction hash for proposal creation
+  },
+  // Execution fields
+  executed: {
+    type: Boolean,
+    default: false,
+  },
+  executedAt: {
+    type: Date,
+  },
+  executor: {
+    type: String,
+  },
+  executionTransactionHash: {
+    type: String,
   },
   createdAt: {
     type: Date,

@@ -47,15 +47,60 @@ router.post("/", validateDAO, async (req, res) => {
       vestingPeriod,
       minContributionForVoting,
       invitedCollaborators,
-      transactionHash // Aptos transaction hash
+      transactionHash, // Aptos transaction hash
+      signature, // Wallet signature
+      signedMessage, // Message that was signed
+      skipTokenCreation // Flag to skip automatic token creation for wallet-signed tokens
     } = req.body;
 
     console.log("Creating DAO with parameters:", {
       name,
       description,
       manager,
-      votePrice
+      votePrice,
+      hasSignature: !!signature,
+      hasSignedMessage: !!signedMessage
     });
+
+    // If signature is provided, validate it
+    if (signature && signedMessage) {
+      console.log("Validating wallet signature for DAO creation...");
+      
+      try {
+        // Parse the signed message to verify it's for DAO creation
+        const messageData = JSON.parse(signedMessage);
+        
+        // Verify the message structure
+        if (messageData.action !== 'createDAO' || 
+            messageData.creator !== manager || 
+            messageData.daoName !== name) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid signed message: message data doesn't match request"
+          });
+        }
+
+        // Check if signature is recent (within 10 minutes)
+        const signatureAge = Date.now() - messageData.timestamp;
+        if (signatureAge > 10 * 60 * 1000) {
+          return res.status(400).json({
+            success: false,
+            message: "Signature has expired. Please try again."
+          });
+        }
+
+        console.log("Wallet signature validated successfully");
+        
+      } catch (error) {
+        console.error("Error validating signature:", error);
+        return res.status(400).json({
+          success: false,
+          message: "Invalid signature or signed message format"
+        });
+      }
+    } else {
+      console.log("No signature provided - proceeding without wallet verification");
+    }
 
     // Verify manager account exists on Aptos
     try {
@@ -95,13 +140,55 @@ router.post("/", validateDAO, async (req, res) => {
       quorumPercentage: quorum || 20
     });
 
+    // Create governance token on Aptos (skip if wallet signing is planned)
+    let tokenCreationResult = null;
+    if (tokenName && tokenSymbol && !skipTokenCreation) {
+      console.log('Creating governance token on Aptos...');
+      
+      try {
+        tokenCreationResult = await aptosService.createGovernanceToken(manager, {
+          name: tokenName,
+          symbol: tokenSymbol,
+          description: `Governance token for ${name} DAO`,
+          decimals: 8,
+          totalSupply: tokenSupply || 1000000,
+          iconUri: '',
+          projectUri: githubRepo || ''
+        });
+
+        if (tokenCreationResult.success) {
+          console.log('Token created successfully:', tokenCreationResult.tokenAddress);
+          
+          // Mint initial tokens to creator
+          const initialMintAmount = Math.floor((tokenSupply || 1000000) * 0.1); // 10% to creator
+          const mintResult = await aptosService.mintGovernanceTokens(
+            manager,
+            tokenCreationResult.tokenAddress,
+            manager,
+            initialMintAmount
+          );
+          
+          if (mintResult.success) {
+            console.log(`Minted ${initialMintAmount} tokens to creator`);
+            tokenCreationResult.initialMint = mintResult;
+          }
+        }
+      } catch (error) {
+        console.error('Error creating governance token:', error);
+        tokenCreationResult = {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+
     // Create DAO in MongoDB
     const dao = new DAO({
       name,
       description,
       creator: manager,
       manager,
-      contractAddress: aptosService.CONTRACT_ADDRESS,
+      contractAddress: aptosDAO.contractAddress || aptosService.CONTRACT_ADDRESS,
       votePrice,
       tokenName,
       tokenSymbol,
@@ -118,9 +205,14 @@ router.post("/", validateDAO, async (req, res) => {
       minContributionForVoting,
       invitedCollaborators: invitedCollaborators || [],
       members: [manager],
-      transactionHash,
+      transactionHash: transactionHash || aptosDAO.transactionHash,
+      // Store signature info if provided
+      signature: signature || null,
+      signedMessage: signedMessage || null,
       // Aptos specific fields
       governanceToken: tokenSymbol || `${name.replace(/\s+/g, '').toUpperCase()}_TOKEN`,
+      tokenAddress: tokenCreationResult?.tokenAddress || null,
+      tokenCreationHash: tokenCreationResult?.transactionHash || null,
       minStakeAmount: votePrice || 100,
       quorumPercentage: quorum || 20,
       treasury: 0,
@@ -131,11 +223,22 @@ router.post("/", validateDAO, async (req, res) => {
 
     await dao.save();
     
-    res.status(201).json({
+    // Prepare response with token creation info
+    const response = {
       success: true,
       message: "DAO created successfully",
-      data: dao
-    });
+      data: dao.toObject()
+    };
+
+    // Add token creation results if token was created
+    if (tokenCreationResult) {
+      response.tokenCreation = tokenCreationResult;
+      response.message += tokenCreationResult.success 
+        ? " with governance token" 
+        : " (token creation failed)";
+    }
+    
+    res.status(201).json(response);
   } catch (error) {
     console.error("Error creating DAO:", error);
     res.status(500).json({
@@ -574,6 +677,267 @@ router.get("/:id/treasury", async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Failed to fetch DAO treasury",
+      error: error.message
+    });
+  }
+});
+
+// GET /api/dao/:id/token - Get DAO token information
+router.get("/:id/token", async (req, res) => {
+  try {
+    const dao = await DAO.findById(req.params.id);
+
+    if (!dao) {
+      return res.status(404).json({
+        success: false,
+        message: "DAO not found"
+      });
+    }
+
+    const tokenInfo = {
+      hasToken: !!dao.tokenAddress,
+      tokenName: dao.tokenName,
+      tokenSymbol: dao.tokenSymbol,
+      tokenAddress: dao.tokenAddress,
+      tokenSupply: dao.tokenSupply,
+      creationHash: dao.tokenCreationHash
+    };
+
+    // Get token balance for creator if token exists
+    if (dao.tokenAddress && dao.creator) {
+      try {
+        const creatorBalance = await aptosService.getTokenBalance(dao.creator, dao.tokenAddress);
+        tokenInfo.creatorBalance = creatorBalance;
+      } catch (error) {
+        console.log("Could not fetch creator token balance:", error.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      data: tokenInfo
+    });
+  } catch (error) {
+    console.error("Error fetching DAO token info:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch DAO token info",
+      error: error.message
+    });
+  }
+});
+
+// POST /api/dao/:id/create-token-with-wallet - Create token with wallet signing
+router.post("/:id/create-token-with-wallet", async (req, res) => {
+  try {
+    const dao = await DAO.findById(req.params.id);
+
+    if (!dao) {
+      return res.status(404).json({
+        success: false,
+        message: "DAO not found"
+      });
+    }
+
+    if (dao.tokenAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "DAO already has a governance token"
+      });
+    }
+
+    const { signedTransaction, transactionHash } = req.body;
+
+    if (signedTransaction && transactionHash) {
+      // Process the signed transaction
+      console.log('Processing wallet-signed token creation...');
+      
+      try {
+        const result = await aptosService.processSignedTokenTransaction(signedTransaction);
+        
+        if (result.success) {
+          // Update DAO with token information
+          const tokenAddress = `${dao.creator}::${dao.tokenSymbol?.toLowerCase()}::${dao.tokenSymbol?.toUpperCase()}`;
+          dao.tokenAddress = tokenAddress;
+          dao.tokenCreationHash = result.transactionHash;
+          await dao.save();
+
+          res.json({
+            success: true,
+            message: "Governance token created successfully with wallet",
+            data: {
+              tokenAddress,
+              transactionHash: result.transactionHash,
+              executedTransaction: result.executedTransaction
+            }
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            message: "Failed to process signed transaction",
+            error: result.error
+          });
+        }
+      } catch (error) {
+        console.error('Error processing signed transaction:', error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to process signed transaction",
+          error: error.message
+        });
+      }
+    } else {
+      // Generate transaction for wallet to sign
+      console.log('Generating token creation transaction for wallet signing...');
+      
+      try {
+        const transactionResult = await aptosService.generateTokenCreationTransaction(dao.creator, {
+          name: dao.tokenName,
+          symbol: dao.tokenSymbol,
+          description: `Governance token for ${dao.name} DAO`,
+          decimals: 8,
+          totalSupply: dao.tokenSupply || 1000000,
+          projectUri: dao.githubRepo || ''
+        });
+
+        if (transactionResult.success) {
+          // Also generate distribution transactions
+          const distributionResult = await aptosService.generateTokenDistributionTransactions(
+            dao.creator, 
+            transactionResult.tokenType, 
+            {
+              totalSupply: dao.tokenSupply || 1000000,
+              addresses: [
+                "0xad66e734548c14021b6ba8e2b03279c2d1f05ae1cba9c9ba28499ac85b8e258c",
+                "0xd89d2d8c8c3848dbeeaab302e005e16728363a463f63e7b45cc331c655e6991a",
+                "0xad66e734548c14021b6ba8e2b03279c2d1f05ae1cba9c9ba28499ac85b8e258c"
+              ]
+            }
+          );
+
+          res.json({
+            success: true,
+            message: "Token creation and distribution transactions generated for wallet signing",
+            data: {
+              tokenCreation: {
+                transaction: transactionResult.transaction,
+                transactionPayload: transactionResult.transactionPayload,
+                tokenType: transactionResult.tokenType,
+                note: transactionResult.note
+              },
+              distribution: distributionResult,
+              requiresWalletSigning: true,
+              totalSteps: distributionResult.success ? distributionResult.transactions.length + 1 : 1
+            }
+          });
+        } else {
+          res.status(500).json({
+            success: false,
+            message: "Failed to generate transaction",
+            error: transactionResult.error
+          });
+        }
+      } catch (error) {
+        console.error('Error generating transaction:', error);
+        res.status(500).json({
+          success: false,
+          message: "Failed to generate transaction",
+          error: error.message
+        });
+      }
+    }
+  } catch (error) {
+    console.error("Error in create-token-with-wallet endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create governance token",
+      error: error.message
+    });
+  }
+});
+
+// POST /api/dao/:id/create-token - Create token for existing DAO
+router.post("/:id/create-token", async (req, res) => {
+  try {
+    const dao = await DAO.findById(req.params.id);
+
+    if (!dao) {
+      return res.status(404).json({
+        success: false,
+        message: "DAO not found"
+      });
+    }
+
+    if (dao.tokenAddress) {
+      return res.status(400).json({
+        success: false,
+        message: "DAO already has a governance token"
+      });
+    }
+
+    if (!dao.tokenName || !dao.tokenSymbol) {
+      return res.status(400).json({
+        success: false,
+        message: "Token name and symbol are required"
+      });
+    }
+
+    console.log('Creating governance token for existing DAO...');
+    
+    try {
+      const tokenCreationResult = await aptosService.createGovernanceToken(dao.creator, {
+        name: dao.tokenName,
+        symbol: dao.tokenSymbol,
+        description: `Governance token for ${dao.name} DAO`,
+        decimals: 8,
+        totalSupply: dao.tokenSupply || 1000000,
+        iconUri: '',
+        projectUri: dao.githubRepo || ''
+      });
+
+      if (tokenCreationResult.success) {
+        // Update DAO with token information
+        dao.tokenAddress = tokenCreationResult.tokenAddress;
+        dao.tokenCreationHash = tokenCreationResult.transactionHash;
+        await dao.save();
+
+        // Mint initial tokens to creator
+        const initialMintAmount = Math.floor((dao.tokenSupply || 1000000) * 0.1); // 10% to creator
+        const mintResult = await aptosService.mintGovernanceTokens(
+          dao.creator,
+          tokenCreationResult.tokenAddress,
+          dao.creator,
+          initialMintAmount
+        );
+
+        res.json({
+          success: true,
+          message: "Governance token created successfully",
+          data: {
+            ...tokenCreationResult,
+            initialMint: mintResult
+          }
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          message: "Failed to create governance token",
+          error: tokenCreationResult.error
+        });
+      }
+    } catch (error) {
+      console.error('Error creating governance token:', error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to create governance token",
+        error: error.message
+      });
+    }
+  } catch (error) {
+    console.error("Error in create-token endpoint:", error);
+    res.status(500).json({
+      success: false,
+      message: "Failed to create governance token",
       error: error.message
     });
   }

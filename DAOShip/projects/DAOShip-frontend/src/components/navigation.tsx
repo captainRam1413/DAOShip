@@ -229,24 +229,47 @@ const Navigation = () => {
     setIsModalOpen(false);
 
     try {
+      console.log('Connecting to wallet type:', walletType);
+      
       toast({
         title: "Connecting Wallet",
         description: `Connecting to ${walletType}...`,
       });
 
-      const address = await connectWallet();
+      // Map wallet types to provider names
+      let providerName = 'petra'; // Default
+      if (walletType === 'petra' || walletType.toLowerCase().includes('petra')) {
+        providerName = 'petra';
+      } else if (walletType.toLowerCase().includes('pera')) {
+        providerName = 'pera';
+      } else if (walletType.toLowerCase().includes('defly')) {
+        providerName = 'defly';
+      }
+
+      console.log('Using provider:', providerName);
+      const address = await connectWallet(providerName);
       setWalletAddress(address);
       setIsConnected(true);
+
+      console.log('Wallet connected successfully:', address);
 
       toast({
         title: "Wallet Connected",
         description: `Successfully connected to ${walletType}`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to connect wallet:", error);
+      
+      let errorMessage = "Failed to connect wallet. Please try again.";
+      if (error.message?.includes('not installed')) {
+        errorMessage = error.message;
+      } else if (error.message?.includes('rejected') || error.message?.includes('cancelled')) {
+        errorMessage = "Connection was cancelled by user";
+      }
+      
       toast({
         title: "Connection Failed",
-        description: "Failed to connect wallet. Please try again.",
+        description: errorMessage,
         variant: "destructive",
       });
     }

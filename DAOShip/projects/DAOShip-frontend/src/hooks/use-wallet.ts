@@ -4,7 +4,7 @@ import { connectWallet, disconnectWallet, getWalletAddress } from "@/lib/wallet"
 interface WalletHook {
   isConnected: boolean;
   walletAddress: string;
-  connect: () => Promise<void>;
+  connect: (provider?: string) => Promise<void>;
   disconnect: () => void;
 }
 
@@ -20,6 +20,7 @@ export const useWallet = (): WalletHook => {
         if (address) {
           setWalletAddress(address);
           setIsConnected(true);
+          console.log('Wallet initialized:', address);
         }
       } catch (error) {
         console.error("Failed to initialize wallet:", error);
@@ -31,11 +32,13 @@ export const useWallet = (): WalletHook => {
     initWallet();
   }, []);
 
-  const connect = async () => {
+  const connect = async (provider: string = 'petra') => {
     try {
-      const address = await connectWallet();
+      console.log('Connecting to wallet with provider:', provider);
+      const address = await connectWallet(provider);
       setWalletAddress(address);
       setIsConnected(true);
+      console.log('Wallet connected successfully:', address);
     } catch (error) {
       console.error("Failed to connect wallet:", error);
       setIsConnected(false);

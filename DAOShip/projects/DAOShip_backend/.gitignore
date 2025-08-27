@@ -1,6 +1,6 @@
 # dependencies
 node_modules/
-
+.env.example
 # build
 dist/
 build/
@@ -12,9 +12,19 @@ Thumbs.db
 # log files
 *.log
 
-# env files
+# env files (comprehensive)
 .env
+.env.*
+!.env.example
+*.env
+!*.env.example
 .env.local
+.env.development
+.env.production
+.env.test
+.env.development.local
+.env.production.local
+.env.test.local
 
 # editor folders
 .vscode/

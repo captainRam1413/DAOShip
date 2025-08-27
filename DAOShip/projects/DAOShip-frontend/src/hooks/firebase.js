@@ -1,9 +1,9 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GithubAuthProvider } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBJTzY3DjZrz5ay0rDUA1Uh2Go2l8teBPg",
+  apiKey: "[REDACTED - Use your own Firebase API key]",
   authDomain: "daoship-24d97.firebaseapp.com",
   projectId: "daoship-24d97",
   storageBucket: "daoship-24d97.firebasestorage.app",
@@ -20,3 +20,9 @@ export const githubProvider = new GithubAuthProvider();
 // Request additional GitHub scopes (optional)
 githubProvider.addScope('repo');
 githubProvider.addScope('user:email');
+
+// Simplified Firebase setup without complex offline persistence
+// that was causing connectivity issues
+console.log('Firebase initialized successfully');
+
+export const isOnline = navigator.onLine;

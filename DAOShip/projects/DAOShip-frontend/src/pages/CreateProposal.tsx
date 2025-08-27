@@ -10,12 +10,14 @@ import GradientButton from "@/components/ui/gradient-button";
 import { useToast } from "@/hooks/use-toast";
 import { get } from "http";
 import { getDAO } from "@/lib/api";
-import { createProposal } from "@/lib/api";
+import { createProposal, createProposalWithWallet } from "@/lib/api";
+import { useWallet } from "@/hooks/use-wallet";
 
 const CreateProposal = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { isConnected, walletAddress, connect } = useWallet();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [dao, setDao] = useState(null);
@@ -88,22 +90,32 @@ const handleSubmit = async (e: React.FormEvent) => {
     return;
   }
 
+  // Check if wallet is connected
+  if (!isConnected) {
+    toast({
+      title: "Wallet Not Connected",
+      description: "Please connect your wallet to create a proposal",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  // Check if we have a valid wallet address
+  if (!walletAddress || walletAddress.trim() === "") {
+    toast({
+      title: "Invalid Wallet Address",
+      description: "Please reconnect your wallet and try again",
+      variant: "destructive",
+    });
+    return;
+  }
+
   setIsSubmitting(true);
 
   try {
     console.log("Creating proposal for DAO:", id);
-
-    // Try to get the real creator ID from the DAO If it's not available, use a valid placeholder ObjectId
-    const currentUserId = dao.creator?._id || dao.creator;
-
-    // Use this valid ObjectId as a placeholder if needed This MUST be a valid 24-character hex string that can be cast to ObjectId
-    const placeholderUserId = "507f1f77bcf86cd799439011";
-
-    // Ensure we have a valid ObjectId-compatible string
-    const creatorId =
-      currentUserId && /^[0-9a-fA-F]{24}$/.test(currentUserId)
-        ? currentUserId
-        : placeholderUserId;
+    console.log("Wallet address:", walletAddress);
+    console.log("Is connected:", isConnected);
 
     const { startTime, endTime } = calculateProposalTimes(
       formData.votingPeriod
@@ -113,32 +125,49 @@ const handleSubmit = async (e: React.FormEvent) => {
     const proposalData = {
       title: formData.title,
       description: formData.description,
-      dao: id, // DAO ID from URL param
-      creator: creatorId, // Use the valid ObjectId-compatible string
+      daoId: id, // DAO ID from URL param
+      creator: walletAddress, // Use actual wallet address
       startTime: startTime.toISOString(),
       endTime: endTime.toISOString(),
     };
 
     console.log("Submitting proposal data:", proposalData);
 
-    // Use the api.ts helper function
-    const createdProposal = await createProposal(id, proposalData);
+    // Show toast for wallet signing request
+    toast({
+      title: "Wallet Signature Required",
+      description: "Please sign the transaction in your wallet to create the proposal",
+    });
+
+    // Use wallet-integrated proposal creation
+    const createdProposal = await createProposalWithWallet(proposalData, walletAddress);
 
     console.log("Proposal has been created successfully!!", createdProposal);
 
     toast({
       title: "Success",
-      description: "Your proposal has been submitted to the DAO.",
+      description: "Your proposal has been submitted to the DAO. Transaction signed and submitted.",
     });
 
     // Navigate back to the DAO dashboard
     navigate(`/dao/${id}`);
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error creating proposal:", error);
+    
+    let errorMessage = error.message || "Failed to create proposal. Please try again.";
+    let errorTitle = "Error";
+    
+    if (error.message?.includes('cancelled') || error.message?.includes('rejected')) {
+      errorTitle = "Transaction Cancelled";
+      errorMessage = "Proposal creation was cancelled. You can try again anytime.";
+    } else if (error.message?.includes('Wallet not connected')) {
+      errorTitle = "Wallet Error";
+      errorMessage = "Please reconnect your wallet and try again.";
+    }
+    
     toast({
-      title: "Error",
-      description:
-        error.message || "Failed to create proposal. Please try again.",
+      title: errorTitle,
+      description: errorMessage,
       variant: "destructive",
     });
   } finally {

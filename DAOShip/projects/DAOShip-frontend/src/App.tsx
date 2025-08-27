@@ -10,6 +10,8 @@ import DAODashboard from "./pages/DAODashboard";
 import CreateProposal from "./pages/CreateProposal";
 import ProposalView from "./pages/ProposalView";
 import NotFound from "./pages/NotFound";
+import WalletTester from "./components/wallet-tester";
+import WalletDebug from "./components/WalletDebug";
 
 const queryClient = new QueryClient();
 
@@ -29,6 +31,8 @@ const App = () => (
             path="/dao/:daoId/proposal/:proposalId"
             element={<ProposalView />}
           />
+          <Route path="/wallet-test" element={<WalletTester />} />
+          <Route path="/wallet-debug" element={<WalletDebug />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

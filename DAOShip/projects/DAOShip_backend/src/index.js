@@ -3,7 +3,9 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const daoRoutes = require("./routes/dao.routes");
+const daoAptosRoutes = require("./routes/dao.routes.aptos");
 const proposalRoutes = require("./routes/proposal.routes");
+const proposalAptosRoutes = require("./routes/proposal.routes.aptos");
 const userRoutes = require("./routes/user.routes");
 
 const app = express();
@@ -21,9 +23,37 @@ mongoose
   .then(() => console.log("Connected to MongoDB"))
   .catch((err) => console.error("MongoDB connection error:", err));
 
+// Health check route
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
+});
+
+// API info route
+app.get('/', (req, res) => {
+  res.json({
+    message: 'DAOShip Backend API',
+    version: '1.0.0',
+    endpoints: {
+      health: '/health',
+      dao: '/api/dao',
+      daoV2: '/api/v2/dao',
+      proposal: '/api/proposal',
+      proposalV2: '/api/v2/proposal',
+      user: '/api/user'
+    },
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
+});
+
 // Routes
 app.use("/api/dao", daoRoutes);
+app.use("/api/v2/dao", daoAptosRoutes); // Aptos-integrated routes
 app.use("/api/proposal", proposalRoutes);
+app.use("/api/v2/proposal", proposalAptosRoutes); // Aptos-integrated proposal routes
 app.use("/api/user", userRoutes);
 
 // Error handling middleware

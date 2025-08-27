@@ -3,6 +3,7 @@ const router = express.Router();
 const DAO = require("../models/DAO");
 const Proposal = require("../models/Proposal");
 const { deployDAOContract } = require("../services/algorand.service");
+const { createAndDistributeToken } = require("../services/aptos.token.service");
 
 // Create a new DAO
 // router.post("/", async (req, res) => {
@@ -48,6 +49,7 @@ router.post("/", async (req, res) => {
       tokenName,
       tokenSymbol,
       tokenSupply,
+      tokenDecimals = 8,
       votingPeriod, 
       quorum,
       minTokens,
@@ -61,27 +63,60 @@ router.post("/", async (req, res) => {
       invitedCollaborators
     } = req.body;
 
-    console.log("Creating DAO with parameters:", {
+    console.log("Creating DAO with Aptos token integration...", {
       name,
       description,
       manager,
-      votePrice});
-    // Deploy DAO contract using AlgoKit
+      tokenName,
+      tokenSymbol,
+      tokenSupply,
+      tokenDecimals
+    });
+
+    // Step 1: Deploy DAO contract (keeping existing logic for now)
     const contractAddress = await deployDAOContract({
       name,
       votingPeriod,
       quorum,
-      // You might want to pass additional contract parameters here
       votePrice,
       tokenName,
       tokenSymbol,
       tokenSupply,
       minTokens
     });
-    // const contractAddress = "dummy-algo-address";
 
-    console.log("Received DAO create request with:", req.body);
+    console.log("✅ DAO contract deployed:", contractAddress);
 
+    // Step 2: Create and distribute governance token on Aptos
+    let tokenResult = null;
+    let tokenCreationError = null;
+
+    try {
+      console.log("🪙 Creating governance token on Aptos...");
+      
+      const tokenConfig = {
+        name: tokenName,
+        symbol: tokenSymbol,
+        decimals: tokenDecimals,
+        initialSupply: tokenSupply,
+        description: `Governance token for ${name} DAO`,
+        iconUri: "", // Could be enhanced with logo upload
+        projectUri: githubRepo || ""
+      };
+
+      tokenResult = await createAndDistributeToken(tokenConfig);
+      console.log("✅ Token created and distributed successfully:", tokenResult);
+
+    } catch (error) {
+      console.error("❌ Token creation failed:", error);
+      tokenCreationError = error.message;
+      
+      // Don't fail the entire DAO creation if token creation fails
+      // This allows for manual token creation later
+      console.log("⚠️  Continuing DAO creation without token...");
+    }
+
+    // Step 3: Create DAO record in database
     const dao = new DAO({
       name,
       description,
@@ -92,6 +127,7 @@ router.post("/", async (req, res) => {
       tokenName,
       tokenSymbol,
       tokenSupply,
+      tokenDecimals,
       votingPeriod,
       quorum,
       minTokens,
@@ -102,17 +138,48 @@ router.post("/", async (req, res) => {
       contributionRewards,
       vestingPeriod,
       minContributionForVoting,
-      invitedCollaborators: invitedCollaborators || [], // Handle array of collaborators
+      invitedCollaborators: invitedCollaborators || [],
       members: [manager], // Initialize with manager as first member
-      // Add invited collaborators to members if they should be auto-added
-      // members: [manager, ...(invitedCollaborators || [])],
+      
+      // Aptos token fields
+      governanceTokenAddress: tokenResult?.tokenAddress || null,
+      tokenCreationHash: tokenResult?.transactionHash || null,
+      tokenDistributionHashes: tokenResult?.distribution?.distributionResults?.map(r => r.transactionHash) || [],
+      tokenDistributionStatus: tokenResult ? 
+        (tokenResult.distribution?.successfulDistributions === 4 ? 'completed' : 'partial') : 
+        'failed'
     });
 
     await dao.save();
-    res.status(201).json(dao);
+
+    // Prepare response
+    const response = {
+      ...dao.toObject(),
+      tokenCreation: tokenResult ? {
+        success: true,
+        tokenAddress: tokenResult.tokenAddress,
+        transactionHash: tokenResult.transactionHash,
+        distributionSummary: {
+          totalDistributed: tokenResult.distribution.totalDistributed,
+          successfulDistributions: tokenResult.distribution.successfulDistributions,
+          failedDistributions: tokenResult.distribution.failedDistributions.length
+        }
+      } : {
+        success: false,
+        error: tokenCreationError,
+        message: "DAO created successfully, but token creation failed. You can create tokens manually later."
+      }
+    };
+
+    console.log("🎉 DAO creation completed!");
+    res.status(201).json(response);
+
   } catch (error) {
-    console.error("Error creating DAO:", error);
-    res.status(500).json({ message: error.message });
+    console.error("❌ Error creating DAO:", error);
+    res.status(500).json({ 
+      message: error.message,
+      details: "DAO creation failed"
+    });
   }
 });
 
@@ -223,6 +290,109 @@ router.post("/:id/join", async (req, res) => {
     await dao.save();
     res.json(dao);
   } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Get token information for a DAO
+router.get("/:id/token", async (req, res) => {
+  try {
+    const dao = await DAO.findById(req.params.id);
+    if (!dao) {
+      return res.status(404).json({ message: "DAO not found" });
+    }
+
+    if (!dao.governanceTokenAddress) {
+      return res.status(404).json({ 
+        message: "No governance token found for this DAO",
+        hasToken: false
+      });
+    }
+
+    const { getTokenMetadata, verifyTokenDistribution } = require("../services/aptos.token.service");
+
+    try {
+      const [metadata, distributionVerification] = await Promise.all([
+        getTokenMetadata(dao.governanceTokenAddress),
+        verifyTokenDistribution(dao.governanceTokenAddress)
+      ]);
+
+      res.json({
+        hasToken: true,
+        tokenAddress: dao.governanceTokenAddress,
+        metadata,
+        distributionVerification,
+        creationHash: dao.tokenCreationHash,
+        distributionHashes: dao.tokenDistributionHashes,
+        distributionStatus: dao.tokenDistributionStatus
+      });
+
+    } catch (error) {
+      res.json({
+        hasToken: true,
+        tokenAddress: dao.governanceTokenAddress,
+        error: "Could not fetch token details",
+        creationHash: dao.tokenCreationHash,
+        distributionHashes: dao.tokenDistributionHashes,
+        distributionStatus: dao.tokenDistributionStatus
+      });
+    }
+
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
+
+// Manually create token for existing DAO (if token creation failed during DAO creation)
+router.post("/:id/create-token", async (req, res) => {
+  try {
+    const dao = await DAO.findById(req.params.id);
+    if (!dao) {
+      return res.status(404).json({ message: "DAO not found" });
+    }
+
+    if (dao.governanceTokenAddress) {
+      return res.status(400).json({ 
+        message: "DAO already has a governance token",
+        tokenAddress: dao.governanceTokenAddress
+      });
+    }
+
+    const { createAndDistributeToken } = require("../services/aptos.token.service");
+
+    const tokenConfig = {
+      name: dao.tokenName,
+      symbol: dao.tokenSymbol,
+      decimals: dao.tokenDecimals || 8,
+      initialSupply: dao.tokenSupply,
+      description: `Governance token for ${dao.name} DAO`,
+      iconUri: "",
+      projectUri: dao.githubRepo || ""
+    };
+
+    const tokenResult = await createAndDistributeToken(tokenConfig);
+
+    // Update DAO with token information
+    dao.governanceTokenAddress = tokenResult.tokenAddress;
+    dao.tokenCreationHash = tokenResult.transactionHash;
+    dao.tokenDistributionHashes = tokenResult.distribution.distributionResults.map(r => r.transactionHash);
+    dao.tokenDistributionStatus = tokenResult.distribution.successfulDistributions === 4 ? 'completed' : 'partial';
+    
+    await dao.save();
+
+    res.json({
+      success: true,
+      tokenAddress: tokenResult.tokenAddress,
+      transactionHash: tokenResult.transactionHash,
+      distributionSummary: {
+        totalDistributed: tokenResult.distribution.totalDistributed,
+        successfulDistributions: tokenResult.distribution.successfulDistributions,
+        failedDistributions: tokenResult.distribution.failedDistributions.length
+      }
+    });
+
+  } catch (error) {
+    console.error("Error creating token manually:", error);
     res.status(500).json({ message: error.message });
   }
 });
